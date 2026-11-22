@@ -234,8 +234,12 @@
     var saved = loadSaved() || S.saved;
     var btn = el('btn-resume');
     if (saved && saved.decoded && !saved.decoded.winner) {
+      var what = saved.mode === 'cpu' ? 'CPU・' + (LEVEL_LABEL[saved.level] || '中級')
+        : saved.mode === 'local' ? '2人対戦'
+        : saved.mode === 'room' ? '部屋コード対戦'
+        : 'リンク対戦';
       btn.hidden = false;
-      btn.textContent = '前回の続きから（' + (LEVEL_LABEL[saved.level] || '') + '）';
+      btn.textContent = '前回の続きから（' + what + '）';
     } else {
       btn.hidden = true;
     }
@@ -960,9 +964,9 @@
       var saved = loadSaved() || S.saved;
       if (!saved || !saved.decoded) { toast('続きの対局がありません'); return; }
       Sound.unlock();
-      if (saved.mode === 'room' && saved.room) {
-        S.room = saved.room;
-        startGame('room', { me: saved.me, level: saved.level, state: saved.decoded, room: saved.room });
+      if (saved.mode === 'room') {
+        // 部屋コードは保存していないので、そのままリンク対戦として続ける
+        startGame('link', { me: saved.me || 1, level: saved.level, state: saved.decoded });
       } else {
         startGame(saved.mode || 'local', { me: saved.me || 1, level: saved.level, state: saved.decoded });
       }
