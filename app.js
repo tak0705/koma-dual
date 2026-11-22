@@ -611,16 +611,16 @@
         cell.style.setProperty('--i', String(st.winLine.indexOf(i)));
       }
 
-      // 重なり（スタック）の段数: 色は透かさず、段差とリングだけで示す
+      // 重なり（スタック）の段数: 色は透かさず、下の層の段差とバッジで示す
       if (stack.length > 1) {
         cell.classList.add('stacked');
         var topSize = stack[stack.length - 1].s;
         var baseW = topSize === 1 ? 48 : topSize === 2 ? 66 : 84;
         for (var r = 1; r < stack.length; r++) {
-          var ring = make('span', 'stack-ring');
-          ring.style.setProperty('--k', String(r));
-          ring.style.setProperty('--w', String(Math.min(97, baseW + 10 * r)) + '%');
-          cell.appendChild(ring);
+          var layer = make('span', 'stack-ring');
+          layer.style.setProperty('--k', String(r));
+          layer.style.setProperty('--w', baseW + '%');
+          cell.appendChild(layer);
         }
         var badge = make('span', 'stack-badge');
         badge.textContent = stack.length + '段';
