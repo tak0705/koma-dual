@@ -740,8 +740,12 @@
     H.click(byId('btn-resume'));
     eq(pieceCount(), 2, '盤面が戻る');
     eq(byId('replay-pos').textContent, '第2手 / 2手', '棋譜も戻る');
+    ok(byId('replay-desc').textContent.indexOf('第2手・プレイヤー2') === 0, '保存後の手も読める');
     H.click(byId('btn-replay-first'));
     eq(pieceCount(), 0);
+    H.click(byId('btn-replay-next'));
+    eq(pieceCount(), 1);
+    ok(byId('replay-desc').textContent.indexOf('第1手・プレイヤー1') === 0, '過去の手も読める');
   });
 
   /* ---------------- 報告 ---------------- */

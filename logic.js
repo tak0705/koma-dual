@@ -434,6 +434,47 @@
     return '第' + i + '手 / ' + t + '手';
   }
 
+  function sameCell(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].p !== b[i].p || a[i].s !== b[i].s) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 2つの局面を比べて、間の1手を導く（lastMove を失った履歴の復元用）。
+   * 保存や共有コードには「直前の手」が入らないので、盤面の差から作る。
+   * 差が読めなければ null。
+   */
+  function deriveMove(prev, next) {
+    if (!prev || !next || !prev.board || !next.board) return null;
+    var gained = -1;
+    var lost = -1;
+    var changed = 0;
+    for (var i = 0; i < CELLS; i++) {
+      var a = prev.board[i] || [];
+      var b = next.board[i] || [];
+      if (sameCell(a, b)) continue;
+      changed += 1;
+      if (b.length === a.length + 1) gained = i;
+      else if (a.length === b.length + 1) lost = i;
+      else return null;               // 同じマスで2枚以上変わっている場合は読めない
+    }
+    if (gained < 0) return null;
+    var top = next.board[gained][next.board[gained].length - 1];
+    if (changed === 1 && lost < 0) {
+      return { t: 'place', s: top.s, to: gained, p: top.p };
+    }
+    if (changed === 2 && lost >= 0) {
+      var from = prev.board[lost];
+      var moved = from.length ? from[from.length - 1] : null;
+      if (!moved || moved.p !== top.p || moved.s !== top.s) return null;
+      return { t: 'move', from: lost, to: gained, s: top.s, p: top.p };
+    }
+    return null;
+  }
+
   /* ---------------- 共有の文面 ---------------- */
 
   /**
@@ -612,6 +653,7 @@
     encodeTimeline: encodeTimeline,
     decodeTimeline: decodeTimeline,
     timelineLabel: timelineLabel,
+    deriveMove: deriveMove,
     shareMessage: shareMessage,
     createStats: createStats,
     normalizeStats: normalizeStats,

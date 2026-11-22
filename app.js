@@ -277,6 +277,17 @@
     return S.state;
   }
 
+  /** 第 idx 手の手。保存から復元した履歴は lastMove が無いので盤面の差から導く。 */
+  function moveAt(idx) {
+    var st = S.states[idx];
+    if (!st || idx <= 0) return null;
+    return st.lastMove || L.deriveMove(S.states[idx - 1], st);
+  }
+
+  function viewIndex() {
+    return S.review === null ? S.states.length - 1 : S.review;
+  }
+
   function canControl(player) {
     var st = S.state;
     if (!st || st.winner || st.draw || S.busy || S.thinking) return false;
@@ -571,6 +582,7 @@
   function renderBoard() {
     var st = viewState();
     var live = S.review === null;
+    var lastMove = moveAt(viewIndex());
     var boardEl = el('board');
     var tgt = targets();
     var key = st.moveCount + ':' + (st.winner || 0) + ':' + (st.draw ? 'd' : '');
@@ -605,7 +617,7 @@
         if (st.turn === 2) cell.classList.add('p2');
       }
       if (S.sel && S.sel.kind === 'board' && S.sel.cell === i) cell.classList.add('picked');
-      if (st.lastMove && st.lastMove.to === i) cell.classList.add('last');
+      if (lastMove && lastMove.to === i) cell.classList.add('last');
       if (st.winLine && st.winLine.indexOf(i) >= 0) {
         cell.classList.add('win');
         cell.style.setProperty('--i', String(st.winLine.indexOf(i)));
@@ -636,7 +648,7 @@
         var isTop = k === stack.length - 1;
         var piece = make('span', 'disc piece p' + pc.p + ' s' + pc.s + (isTop ? ' top' : ''));
         piece.style.setProperty('--d', String(stack.length - 1 - k));
-        if (animate && st.lastMove && st.lastMove.to === i && isTop) {
+        if (animate && lastMove && lastMove.to === i && isTop) {
           piece.classList.add(gobbling ? 'slam' : 'pop');
         }
         cell.appendChild(piece);
@@ -747,10 +759,10 @@
     el('btn-replay-last').disabled = idx >= total;
 
     var desc = '初期局面';
-    var view = S.states[idx];
-    if (idx > 0 && view && view.lastMove) {
-      desc = '第' + idx + '手・' + playerName(view.lastMove.p) + '：' + L.describeMove(view.lastMove);
-      if (view.reason === 'reveal') desc += '（自爆：下から相手のライン）';
+    var mv = moveAt(idx);
+    if (idx > 0 && mv) {
+      desc = '第' + idx + '手・' + playerName(mv.p) + '：' + L.describeMove(mv);
+      if (S.states[idx] && S.states[idx].reason === 'reveal') desc += '（自爆：下から相手のライン）';
     }
     el('replay-desc').textContent = desc;
   }

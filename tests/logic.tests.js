@@ -537,6 +537,47 @@
     eq(L.timelineLabel(99, 12), '第12手 / 12手');
   });
 
+  test('局面の差から1手を導ける（保存後のふりかえり）', function () {
+    var g = L.createGame();
+    var s1 = L.applyMove(g, { t: 'place', s: 2, to: 4 });
+    eq(L.deriveMove(g, s1), { t: 'place', s: 2, to: 4, p: 1 });
+    var s2 = L.applyMove(s1, { t: 'place', s: 1, to: 0 });
+    eq(L.deriveMove(s1, s2), { t: 'place', s: 1, to: 0, p: 2 });
+    var s3 = L.applyMove(s2, { t: 'move', from: 4, to: 8, s: 2 });
+    eq(L.deriveMove(s2, s3), { t: 'move', from: 4, to: 8, s: 2, p: 1 });
+    eq(L.deriveMove(s3, s3), null, '同じ局面なら手は無い');
+    eq(L.deriveMove(null, s3), null);
+    eq(L.deriveMove(g, null), null);
+  });
+
+  test('保存した棋譜からも各手を復元できる（lastMove は入っていない）', function () {
+    var st = L.createGame();
+    var states = [L.cloneState(st)];
+    var script = [
+      { t: 'place', s: 1, to: 0 },
+      { t: 'place', s: 2, to: 4 },
+      { t: 'move', from: 0, to: 8, s: 1 },
+      { t: 'place', s: 3, to: 4 },
+      { t: 'place', s: 1, to: 2 }
+    ];
+    for (var i = 0; i < script.length; i++) {
+      st = L.applyMove(st, script[i]);
+      states.push(L.cloneState(st));
+    }
+    var back = L.decodeTimeline(L.encodeTimeline(states));
+    eq(back.length, states.length);
+    for (var k = 1; k < back.length; k++) {
+      eq(back[k].lastMove, null, '保存した局面に lastMove は無い');
+      var d = L.deriveMove(back[k - 1], back[k]);
+      ok(d, '第' + k + '手を導ける');
+      eq(d.t, script[k - 1].t);
+      eq(d.to, script[k - 1].to);
+      eq(d.s, script[k - 1].s);
+      eq(d.p, k % 2 === 1 ? 1 : 2, '指した側');
+      if (script[k - 1].t === 'move') eq(d.from, script[k - 1].from);
+    }
+  });
+
   /* ================= 戦績 ================= */
 
   test('戦績は0からはじまる', function () {
