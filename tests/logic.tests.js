@@ -458,6 +458,184 @@
     ok(rng() >= 0 && rng() <= 1);
   });
 
+  /* ================= 対面表示・共有文面 ================= */
+
+  test('対面表示の反転は 180°回転（0⇔8, 4 はそのまま）', function () {
+    eq(L.flipIndex(0), 8);
+    eq(L.flipIndex(1), 7);
+    eq(L.flipIndex(2), 6);
+    eq(L.flipIndex(3), 5);
+    eq(L.flipIndex(4), 4);
+    eq(L.flipIndex(8), 0);
+    for (var i = 0; i < 9; i++) eq(L.flipIndex(L.flipIndex(i)), i, '2回で元に戻る');
+  });
+
+  test('共有文面は「コマ・デュエルで対局しよう！第○手👇」の形', function () {
+    var g = L.createGame();
+    eq(L.shareMessage(g, 'play'), 'コマ・デュエルで対局しよう！第1手👇');
+    var st = L.applyMove(g, { t: 'place', s: 1, to: 4 });
+    eq(L.shareMessage(st, 'play'), 'コマ・デュエルで対局しよう！第2手👇');
+    eq(L.shareMessage(st, 'result'), 'コマ・デュエルで対局しました！結果はこちら👇');
+    eq(L.shareMessage(st, 'room'), 'コマ・デュエルで部屋対戦しよう！👇');
+  });
+
+  test('共有文面は URL を伴っても読み取れる（リンクの往復）', function () {
+    var st = L.applyMove(L.createGame(), { t: 'place', s: 2, to: 4 });
+    var url = 'https://example.github.io/koma-duel/#g=' + L.encodeState(st) + '&me=2';
+    var line = L.shareMessage(st, 'play') + '\n' + url;
+    var m = line.match(/[#&?]g=([A-Za-z0-9_-]+)/);
+    ok(m, '文面からコードを拾える');
+    var back = L.decodeState(m[1]);
+    eq(L.boardToString(back.board), L.boardToString(st.board));
+    eq(back.turn, 2);
+  });
+
+  /* ================= ふりかえり（棋譜） ================= */
+
+  test('棋譜（各局面）を保存して復元できる', function () {
+    var rng = mulberry32(20261130);
+    var st = L.createGame();
+    var states = [L.cloneState(st)];
+    for (var ply = 0; ply < 12 && !st.winner && !st.draw; ply++) {
+      var moves = L.legalMoves(st);
+      st = L.applyMove(st, moves[Math.floor(rng() * moves.length) % moves.length]);
+      states.push(L.cloneState(st));
+    }
+    var text = L.encodeTimeline(states);
+    ok(text.length > 0, '空でない');
+    var back = L.decodeTimeline(text);
+    eq(back.length, states.length, '手数が一致する');
+    for (var i = 0; i < states.length; i++) {
+      eq(L.boardToString(back[i].board), L.boardToString(states[i].board), '第' + i + '手の盤面');
+      eq(back[i].turn, states[i].turn, '第' + i + '手の手番');
+      eq(back[i].moveCount, states[i].moveCount, '第' + i + '手の手数');
+    }
+    eq(L.boardToString(back[back.length - 1].board), L.boardToString(st.board));
+    if (st.winner) eq(back[back.length - 1].winner, st.winner, '勝者も復元できる');
+  });
+
+  test('棋譜は空・壊れた要素を安全に扱う', function () {
+    eq(L.encodeTimeline([]), '');
+    eq(L.encodeTimeline(null), '');
+    eq(L.decodeTimeline(''), []);
+    eq(L.decodeTimeline(null), []);
+
+    var a = L.encodeState(L.createGame());
+    var st = L.applyMove(L.createGame(), { t: 'place', s: 1, to: 0 });
+    var b = L.encodeState(st);
+    var mixed = a + ',!!!!,' + b;
+    var got = L.decodeTimeline(mixed);
+    eq(got.length, 2, '読めない要素は飛ばす');
+    eq(got[0].moveCount, 0);
+    eq(got[1].moveCount, 1);
+  });
+
+  test('ふりかえりの手数ラベル', function () {
+    eq(L.timelineLabel(0, 0), '第0手 / 0手');
+    eq(L.timelineLabel(3, 12), '第3手 / 12手');
+    eq(L.timelineLabel(-5, 12), '第0手 / 12手');
+    eq(L.timelineLabel(99, 12), '第12手 / 12手');
+  });
+
+  /* ================= 戦績 ================= */
+
+  test('戦績は0からはじまる', function () {
+    var s = L.createStats();
+    eq(s.cpu.easy, { w: 0, l: 0, d: 0, streak: 0, best: 0 });
+    eq(s.cpu.normal, { w: 0, l: 0, d: 0, streak: 0, best: 0 });
+    eq(s.cpu.hard, { w: 0, l: 0, d: 0, streak: 0, best: 0 });
+    eq(s.local, { p1: 0, p2: 0, d: 0, games: 0 });
+    eq(s.link, { w: 0, l: 0, d: 0, streak: 0, best: 0 });
+  });
+
+  test('CPU難易度別に勝敗と連勝を数える', function () {
+    var s = L.createStats();
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'win' });
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'win' });
+    eq(s.cpu.hard.w, 2);
+    eq(s.cpu.hard.streak, 2);
+    eq(s.cpu.hard.best, 2);
+    eq(s.cpu.easy.w, 0, '別の難易度には入らない');
+
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'lose' });
+    eq(s.cpu.hard.l, 1);
+    eq(s.cpu.hard.streak, 0, '負けで連勝は途切れる');
+    eq(s.cpu.hard.best, 2, '最高連勝は残る');
+
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'win' });
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'win' });
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'win' });
+    eq(s.cpu.hard.streak, 3);
+    eq(s.cpu.hard.best, 3);
+
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'draw' });
+    eq(s.cpu.hard.d, 1);
+    eq(s.cpu.hard.streak, 0, '引き分けでも連勝は途切れる');
+  });
+
+  test('2人対戦は先手・後手の累計スコアと対局数を持つ', function () {
+    var s = L.createStats();
+    s = L.recordResult(s, { mode: 'local', result: 'win' });   // 先手勝ち
+    s = L.recordResult(s, { mode: 'local', result: 'lose' });  // 後手勝ち
+    s = L.recordResult(s, { mode: 'local', result: 'win' });
+    s = L.recordResult(s, { mode: 'local', result: 'draw' });
+    eq(s.local, { p1: 2, p2: 1, d: 1, games: 4 });
+  });
+
+  test('リンク対戦の勝敗も記録できる', function () {
+    var s = L.createStats();
+    s = L.recordResult(s, { mode: 'link', result: 'win' });
+    s = L.recordResult(s, { mode: 'room', result: 'lose' });
+    eq(s.link, { w: 1, l: 1, d: 0, streak: 0, best: 1 });
+  });
+
+  test('戦績の記録は元のデータを書き換えない', function () {
+    var a = L.createStats();
+    var before = JSON.stringify(a);
+    L.recordResult(a, { mode: 'cpu', level: 'easy', result: 'win' });
+    eq(JSON.stringify(a), before);
+  });
+
+  test('保存データの欠け・不正を0で埋めて復元する', function () {
+    var broken = L.normalizeStats({ cpu: { hard: { w: 3 } }, local: { p1: 1 } });
+    eq(broken.cpu.hard.w, 3);
+    eq(broken.cpu.hard.l, 0);
+    eq(broken.cpu.easy.w, 0);
+    eq(broken.local.p1, 1);
+    eq(broken.local.games, 1, 'games が無ければ勝敗から数える');
+    eq(L.normalizeStats(null).cpu.normal.w, 0);
+    eq(L.normalizeStats('おかしな値').cpu.normal.w, 0);
+    eq(L.normalizeStats({ cpu: { easy: { w: -3, l: 'x' } } }).cpu.easy.w, 0);
+  });
+
+  test('戦績の表示文（難易度別・2人対戦）', function () {
+    var s = L.createStats();
+    eq(L.statsLine(s, 'cpu:normal'), 'まだ対局なし');
+    eq(L.statsLine(s, 'local'), 'まだ対局なし');
+    s = L.recordResult(s, { mode: 'cpu', level: 'normal', result: 'win' });
+    eq(L.statsLine(s, 'cpu:normal'), '1勝0敗・1連勝中');
+    s = L.recordResult(s, { mode: 'cpu', level: 'normal', result: 'win' });
+    eq(L.statsLine(s, 'cpu:normal'), '2勝0敗・2連勝中（最高2連勝）');
+    s = L.recordResult(s, { mode: 'cpu', level: 'normal', result: 'lose' });
+    eq(L.statsLine(s, 'cpu:normal'), '2勝1敗（最高2連勝）');
+
+    s = L.recordResult(s, { mode: 'local', result: 'win' });
+    s = L.recordResult(s, { mode: 'local', result: 'lose' });
+    s = L.recordResult(s, { mode: 'local', result: 'draw' });
+    eq(L.statsLine(s, 'local'), '先手 1 - 1 後手（引き分け 1）');
+  });
+
+  test('CPU全レベルの合計とリセット', function () {
+    var s = L.createStats();
+    s = L.recordResult(s, { mode: 'cpu', level: 'easy', result: 'win' });
+    s = L.recordResult(s, { mode: 'cpu', level: 'normal', result: 'lose' });
+    s = L.recordResult(s, { mode: 'cpu', level: 'hard', result: 'draw' });
+    eq(L.statsCpuTotal(s), { w: 1, l: 1, d: 1 });
+    var r = L.resetStats();
+    eq(L.statsCpuTotal(r), { w: 0, l: 0, d: 0 });
+    eq(r.local.games, 0);
+  });
+
   /* ---------------- report ---------------- */
 
   var failed = 0;

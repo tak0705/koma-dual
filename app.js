@@ -1,5 +1,6 @@
 /*!
- * koma-duel  app.js — 画面まわり（盤面・手札・対戦モード・リンク共有）
+ * koma-duel  app.js — 画面まわり
+ *   盤面・手札・対戦モード・リンク共有・1手ずつのふりかえり・戦績・対面表示
  *
  * 依存: logic.js (window.KomaLogic), ai.js (window.KomaAI)
  */
@@ -21,8 +22,10 @@
     hard: '先まで読む上級。αβ探索で攻める'
   };
   var STORE_KEY = 'komaDuell.v1';
+  var STATS_KEY = 'komaDuell.stats.v1';
   var AI_NAME = 'ピッコロAI';
   var PLAYER_TAG = { 1: '先手', 2: '後手' };
+  var SIDE_LABEL = { 1: '金', 2: '青' };
 
   function el(id) { return document.getElementById(id); }
   function make(tag, cls) {
@@ -39,18 +42,24 @@
     mode: 'menu',        // menu | cpu | local | link | room
     me: 1,               // 自分が担当するプレイヤー番号（下側に表示）
     level: 'normal',
-    state: null,
-    history: [],         // 各手を指す前の状態（待った用）
+    state: null,         // いまの局面
+    states: [],          // 0手目から現在までの各局面（ふりかえり用）
     sel: null,           // {kind:'hand', size} | {kind:'board', cell}
+    review: null,        // ふりかえり中の手数（null なら現在の局面）
+    flip: false,         // 2人対戦の対面表示（盤面と手番を180°反転）
     busy: false,         // AI 思考中など
     thinking: false,
     over: false,
+    recorded: false,     // この対局の結果を戦績に入れたか
     sound: true,
+    stats: null,
     room: null,
     pollTimer: null,
     animKey: '',
     gen: 0,
-    saved: null
+    saved: null,
+    shareText: '',
+    fx: { gobble: -1, reveal: false }
   };
 
   function bumpGen() { S.gen += 1; return S.gen; }
@@ -92,10 +101,38 @@
       } catch (e) { /* 音が出なくても遊べる */ }
     }
 
-    function seq(freqs, dur, vol, gap) {
+    /** 短いノイズ（「ガブッ」「トン」の質感づくり）。 */
+    function noise(dur, vol, from, to, q) {
+      var c = ensure();
+      if (!c) return;
+      try {
+        var len = Math.max(1, Math.floor(c.sampleRate * dur));
+        var buf = c.createBuffer(1, len, c.sampleRate);
+        var data = buf.getChannelData(0);
+        for (var i = 0; i < len; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2);
+        }
+        var src = c.createBufferSource();
+        src.buffer = buf;
+        var filter = c.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.Q.value = q || 1;
+        filter.frequency.setValueAtTime(from || 1200, c.currentTime);
+        if (to) filter.frequency.exponentialRampToValueAtTime(to, c.currentTime + dur);
+        var g = c.createGain();
+        g.gain.setValueAtTime(vol || 0.2, c.currentTime);
+        src.connect(filter);
+        filter.connect(g);
+        g.connect(c.destination);
+        src.start();
+        src.stop(c.currentTime + Math.min(1, dur) + 0.02);
+      } catch (e) { /* 省略可 */ }
+    }
+
+    function seq(freqs, dur, vol, gap, type) {
       for (var i = 0; i < freqs.length; i++) {
         (function (f, i2) {
-          setTimeout(function () { tone(f, dur, 'sine', vol); }, i2 * gap);
+          setTimeout(function () { tone(f, dur, type || 'sine', vol); }, i2 * gap);
         })(freqs[i], i);
       }
     }
@@ -104,10 +141,16 @@
       unlock: function () { ensure(); },
       tap: function () { tone(760, 0.04, 'sine', 0.05); },
       pick: function () { tone(640, 0.06, 'sine', 0.08, 760); },
-      place: function () { tone(520, 0.09, 'sine', 0.16, 700); },
-      gobble: function () { tone(340, 0.14, 'triangle', 0.2, 170); },
-      move: function () { tone(430, 0.1, 'sine', 0.13, 580); },
+      place: function () { noise(0.07, 0.10, 2200, 500, 0.8); tone(540, 0.09, 'sine', 0.15, 700); },
+      gobble: function () { noise(0.17, 0.24, 900, 150, 1.1); tone(300, 0.16, 'triangle', 0.16, 140); },
+      move: function () { noise(0.05, 0.06, 1800, 600, 0.8); tone(430, 0.1, 'sine', 0.12, 580); },
       invalid: function () { tone(160, 0.12, 'square', 0.07, 120); },
+      undo: function () { tone(420, 0.08, 'sine', 0.1, 300); },
+      flip: function () { tone(520, 0.07, 'sine', 0.1, 660); },
+      reveal: function () {
+        tone(170, 0.26, 'triangle', 0.2, 110);
+        seq([784, 988, 1319], 0.18, 0.11, 88);
+      },
       win: function () { seq([523, 659, 784, 1047], 0.2, 0.13, 92); },
       lose: function () { seq([392, 330, 262], 0.24, 0.11, 118); },
       draw: function () { seq([440, 440], 0.18, 0.09, 150); }
@@ -164,7 +207,9 @@
         me: S.me,
         level: S.level,
         sound: S.sound,
+        flip: S.flip,
         state: L.encodeState(S.state),
+        timeline: L.encodeTimeline(S.states),
         at: Date.now()
       }));
     } catch (e) { /* 保存できなくても遊べる */ }
@@ -177,15 +222,49 @@
       var d = JSON.parse(raw);
       if (!d || !d.state) return null;
       d.decoded = L.decodeState(d.state);
+
+      // ふりかえり用の履歴。最後の局面が保存した局面と一致しなければ単一局面に戻す
+      var timeline = d.timeline ? L.decodeTimeline(d.timeline) : [];
+      var last = timeline.length ? timeline[timeline.length - 1] : null;
+      var same = last &&
+        L.boardToString(last.board) === L.boardToString(d.decoded.board) &&
+        last.turn === d.decoded.turn;
+      d.states = same ? timeline : [d.decoded];
       return d;
     } catch (e) { return null; }
+  }
+
+  function loadStats() {
+    try {
+      var raw = localStorage.getItem(STATS_KEY);
+      if (!raw) return L.createStats();
+      return L.normalizeStats(JSON.parse(raw));
+    } catch (e) { return L.createStats(); }
+  }
+
+  function saveStats() {
+    try { localStorage.setItem(STATS_KEY, JSON.stringify(S.stats)); } catch (e) {}
   }
 
   /* =====================================================================
      ユーティリティ
      ===================================================================== */
 
-  function bottomPlayer() { return S.mode === 'local' ? 1 : S.me; }
+  function bottomPlayer() {
+    if (S.mode === 'local') {
+      // 対面表示では、手番のプレイヤーがいつも手前に座る
+      if (!S.flip) return 1;
+      var st = viewState();
+      return st.turn === 2 ? 2 : 1;
+    }
+    if (S.mode === 'menu') return 1;
+    return S.me;
+  }
+
+  /** 盤面を180°回して描くか（対面表示で、手前が後手のとき）。 */
+  function isRotated() {
+    return S.mode === 'local' && S.flip && bottomPlayer() === 2;
+  }
 
   function playerName(p) {
     if (S.mode === 'cpu') return p === 1 ? 'あなた' : AI_NAME;
@@ -193,9 +272,15 @@
     return 'プレイヤー' + p;
   }
 
+  function viewState() {
+    if (S.review !== null && S.states[S.review]) return S.states[S.review];
+    return S.state;
+  }
+
   function canControl(player) {
     var st = S.state;
     if (!st || st.winner || st.draw || S.busy || S.thinking) return false;
+    if (S.review !== null) return false;              // ふりかえり中は指せない
     if (S.mode === 'local') return player === st.turn;
     return player === S.me && st.turn === player;
   }
@@ -221,6 +306,7 @@
     el('screen-menu').classList.remove('hidden');
     el('screen-game').classList.add('hidden');
     el('mode-label').textContent = '大中小の三目並べ';
+    renderStats();
     refreshResume();
   }
 
@@ -246,6 +332,75 @@
   }
 
   /* =====================================================================
+     戦績
+     ===================================================================== */
+
+  function statsSummaryText() {
+    var s = S.stats || L.createStats();
+    var cpu = L.statsCpuTotal(s);
+    var parts = [];
+    var cpuGames = cpu.w + cpu.l + cpu.d;
+    if (cpuGames) parts.push('CPU ' + cpu.w + '勝' + cpu.l + '敗' + (cpu.d ? cpu.d + '分' : ''));
+    if (s.local.games) parts.push('2人 先手' + s.local.p1 + '-' + s.local.p2 + '後手');
+    var linkGames = s.link.w + s.link.l + s.link.d;
+    if (linkGames) parts.push('リンク ' + s.link.w + '勝' + s.link.l + '敗');
+    return parts.length ? parts.join(' ／ ') : 'まだ対局なし';
+  }
+
+  function statRow(scope, label) {
+    var row = make('div', 'stats-row');
+    var k = make('span', 'stats-key');
+    k.textContent = label;
+    var v = make('span', 'stats-val');
+    v.textContent = L.statsLine(S.stats, scope);
+    row.appendChild(k);
+    row.appendChild(v);
+    return row;
+  }
+
+  function renderStats() {
+    var box = el('stats-rows');
+    if (!box) return;
+    S.stats = S.stats || L.createStats();
+    box.innerHTML = '';
+    box.appendChild(statRow('cpu:easy', 'CPU 初級'));
+    box.appendChild(statRow('cpu:normal', 'CPU 中級'));
+    box.appendChild(statRow('cpu:hard', 'CPU 上級'));
+    box.appendChild(statRow('local', '2人対戦'));
+    box.appendChild(statRow('link', 'リンク対戦'));
+    el('stats-sum').textContent = statsSummaryText();
+  }
+
+  /** いま終わった1局を、戦績へ一度だけ記録する。 */
+  function recordStatsOnce() {
+    if (S.recorded) return;
+    S.recorded = true;
+    var st = S.state;
+    if (!st) return;
+    var info = { mode: S.mode };
+    if (S.mode === 'cpu') {
+      info.level = S.level;
+      info.result = !st.winner ? 'draw' : (st.winner === S.me ? 'win' : 'lose');
+    } else if (S.mode === 'local') {
+      info.result = !st.winner ? 'draw' : (st.winner === 1 ? 'win' : 'lose');
+    } else if (S.mode === 'link' || S.mode === 'room') {
+      info.result = !st.winner ? 'draw' : (st.winner === S.me ? 'win' : 'lose');
+    } else {
+      return;
+    }
+    S.stats = L.recordResult(S.stats, info);
+    saveStats();
+    renderStats();
+  }
+
+  function resultStatsLine() {
+    if (S.mode === 'cpu') return 'このレベルの通算 ' + L.statsLine(S.stats, 'cpu:' + S.level);
+    if (S.mode === 'local') return '2人対戦の通算 ' + L.statsLine(S.stats, 'local');
+    if (S.mode === 'link' || S.mode === 'room') return 'リンク対戦の通算 ' + L.statsLine(S.stats, 'link');
+    return '';
+  }
+
+  /* =====================================================================
      ゲーム開始
      ===================================================================== */
 
@@ -255,13 +410,28 @@
     S.mode = mode;
     S.level = opts.level || S.level;
     S.me = opts.me || 1;
-    S.state = opts.state || L.createGame();
-    S.history = [];
+
+    if (opts.states && opts.states.length) {
+      S.states = opts.states.map(function (s) { return L.cloneState(s); });
+      S.state = L.cloneState(S.states[S.states.length - 1]);
+    } else {
+      S.state = opts.state ? L.cloneState(opts.state) : L.createGame();
+      S.states = [L.cloneState(S.state)];
+    }
+
     S.sel = null;
     S.busy = false;
     S.thinking = false;
     S.over = false;
     S.animKey = '';
+    S.review = null;
+    S.fx = { gobble: -1, reveal: false };
+    // 決着済みの局面（保存や共有リンク）を開いたときは、結果を二重に数えない
+    S.recorded = !!(S.state.winner || S.state.draw);
+
+    if (opts.flip !== undefined) S.flip = !!opts.flip;
+    if (mode !== 'local') S.flip = false;
+
     if (opts.room !== undefined) S.room = opts.room;
     if (mode !== 'room') S.room = null;
 
@@ -283,12 +453,15 @@
   function restart() {
     bumpGen();
     S.state = L.createGame();
-    S.history = [];
+    S.states = [L.cloneState(S.state)];
     S.sel = null;
     S.busy = false;
     S.thinking = false;
     S.over = false;
+    S.recorded = false;
+    S.review = null;
     S.animKey = '';
+    S.fx = { gobble: -1, reveal: false };
     if (S.mode === 'link' || S.mode === 'room') S.me = 1;
     hideResult();
     hideShare();
@@ -306,9 +479,11 @@
 
   function render() {
     if (!S.state) return;
-    var st = S.state;
+    var st = viewState();
     var bp = bottomPlayer();
     var tp = L.other(bp);
+    var live = S.review === null;
+    var myTurn = !st.winner && !st.draw && st.turn === tp;
 
     el('name-top').textContent = playerName(tp);
     el('name-bottom').textContent = playerName(bp);
@@ -316,10 +491,15 @@
     el('tag-bottom').textContent = PLAYER_TAG[bp];
     el('dot-top').className = 'pdot p' + tp;
     el('dot-bottom').className = 'pdot p' + bp;
-    el('panel-top').classList.toggle('active', st.turn === tp && !st.winner);
+
+    el('panel-top').classList.toggle('active', myTurn);
+    el('panel-top').classList.toggle('turn-now', myTurn && live);
     el('panel-top').classList.toggle('p1', tp === 1);
     el('panel-top').classList.toggle('p2', tp === 2);
-    el('panel-bottom').classList.toggle('active', st.turn === bp && !st.winner);
+
+    var botTurn = !st.winner && !st.draw && st.turn === bp;
+    el('panel-bottom').classList.toggle('active', botTurn);
+    el('panel-bottom').classList.toggle('turn-now', botTurn && live);
     el('panel-bottom').classList.toggle('p1', bp === 1);
     el('panel-bottom').classList.toggle('p2', bp === 2);
 
@@ -328,13 +508,22 @@
     renderBoard();
     renderWinLine();
     renderStatus();
+    renderReplay();
 
-    el('btn-undo').disabled = S.history.length === 0 || S.busy || S.thinking;
+    el('btn-undo').disabled = S.review !== null || S.states.length <= 1 || S.busy || S.thinking;
     el('btn-share').hidden = !(S.mode === 'link' || S.mode === 'room');
+
+    var flipBtn = el('btn-flip');
+    if (flipBtn) {
+      flipBtn.hidden = S.mode !== 'local';
+      flipBtn.classList.toggle('on', S.flip);
+      flipBtn.setAttribute('aria-pressed', S.flip ? 'true' : 'false');
+      flipBtn.textContent = S.flip ? '対面表示：オン' : '対面表示';
+    }
 
     // リンク対戦: 自分の手を指した直後だけ共有ボックスを出す
     if (S.mode === 'link') {
-      if (st.winner || st.turn !== S.me) showShare();
+      if (S.state.winner || S.state.draw || S.state.turn !== S.me) showShare();
       else hideShare();
     } else if (S.mode === 'room') {
       showShare();      // 部屋コード対戦は招待リンクを常に出しておく
@@ -342,7 +531,7 @@
   }
 
   function renderHand(container, player) {
-    var hand = L.handCounts(S.state);
+    var hand = L.handCounts(viewState());
     container.innerHTML = '';
     [3, 2, 1].forEach(function (size) {
       var count = hand[player][size];
@@ -380,15 +569,20 @@
   }
 
   function renderBoard() {
-    var st = S.state;
+    var st = viewState();
+    var live = S.review === null;
     var boardEl = el('board');
     var tgt = targets();
     var key = st.moveCount + ':' + (st.winner || 0) + ':' + (st.draw ? 'd' : '');
-    var animate = key !== S.animKey;
+    var animate = live && key !== S.animKey;
     S.animKey = key;
 
+    boardEl.classList.toggle('flipped', isRotated());
+    boardEl.classList.toggle('reveal', !!(st.winner && st.reason === 'reveal'));
     boardEl.innerHTML = '';
-    for (var i = 0; i < 9; i++) {
+
+    for (var q = 0; q < 9; q++) {
+      var i = isRotated() ? L.flipIndex(q) : q;
       var cell = make('button', 'cell');
       cell.type = 'button';
       cell.dataset.i = String(i);
@@ -398,7 +592,8 @@
       var label = 'マス' + (Math.floor(i / 3) + 1) + '-' + (i % 3 + 1);
       if (stack.length) {
         var top = stack[stack.length - 1];
-        label += '・上のコマ ' + (top.p === 1 ? '金' : '青') + L.SIZE_NAME[top.s];
+        label += '・上のコマ ' + SIDE_LABEL[top.p] + L.SIZE_NAME[top.s];
+        if (stack.length > 1) label += '・' + stack.length + '枚重なり';
         cell.classList.add('has-piece');
       } else {
         label += '・空き';
@@ -411,17 +606,43 @@
       }
       if (S.sel && S.sel.kind === 'board' && S.sel.cell === i) cell.classList.add('picked');
       if (st.lastMove && st.lastMove.to === i) cell.classList.add('last');
-      if (st.winLine && st.winLine.indexOf(i) >= 0) cell.classList.add('win');
+      if (st.winLine && st.winLine.indexOf(i) >= 0) {
+        cell.classList.add('win');
+        cell.style.setProperty('--i', String(st.winLine.indexOf(i)));
+      }
+
+      // 重なり（スタック）の段数: 色は透かさず、段差とリングだけで示す
+      if (stack.length > 1) {
+        cell.classList.add('stacked');
+        var topSize = stack[stack.length - 1].s;
+        var baseW = topSize === 1 ? 48 : topSize === 2 ? 66 : 84;
+        for (var r = 1; r < stack.length; r++) {
+          var ring = make('span', 'stack-ring');
+          ring.style.setProperty('--k', String(r));
+          ring.style.setProperty('--w', String(Math.min(97, baseW + 10 * r)) + '%');
+          cell.appendChild(ring);
+        }
+        var badge = make('span', 'stack-badge');
+        badge.textContent = stack.length + '段';
+        badge.setAttribute('aria-hidden', 'true');
+        cell.appendChild(badge);
+      }
+
+      var gobbling = animate && S.fx.gobble === i;
+      if (gobbling) cell.classList.add('gobble');
 
       for (var k = 0; k < stack.length; k++) {
         var pc = stack[k];
-        var piece = make('span', 'disc piece p' + pc.p + ' s' + pc.s + (k === stack.length - 1 ? ' top' : ''));
+        var isTop = k === stack.length - 1;
+        var piece = make('span', 'disc piece p' + pc.p + ' s' + pc.s + (isTop ? ' top' : ''));
         piece.style.setProperty('--d', String(stack.length - 1 - k));
-        if (animate && st.lastMove && st.lastMove.to === i && k === stack.length - 1) {
-          piece.classList.add('pop');
+        if (animate && st.lastMove && st.lastMove.to === i && isTop) {
+          piece.classList.add(gobbling ? 'slam' : 'pop');
         }
         cell.appendChild(piece);
       }
+
+      if (gobbling) cell.appendChild(make('span', 'fx-wave'));
       boardEl.appendChild(cell);
     }
   }
@@ -431,7 +652,8 @@
     var W = boardEl.clientWidth || 300;
     var pad = 7, gap = 7;
     var cell = (W - pad * 2 - gap * 2) / 3;
-    var c = i % 3, r = Math.floor(i / 3);
+    var pos = isRotated() ? L.flipIndex(i) : i;
+    var c = pos % 3, r = Math.floor(pos / 3);
     var k = 300 / W;
     return {
       x: (pad + c * (cell + gap) + cell / 2) * k,
@@ -440,7 +662,7 @@
   }
 
   function renderWinLine() {
-    var st = S.state;
+    var st = viewState();
     var layer = el('win-layer');
     var line = el('win-line');
     if (!st.winLine || st.winLine.length < 2) {
@@ -460,12 +682,18 @@
   }
 
   function renderStatus() {
-    var st = S.state;
+    var st = viewState();
     var dot = el('turn-dot');
     var text = el('turn-text');
     var sub = el('turn-sub');
 
     dot.className = 'turn-dot' + (st.turn === 2 ? ' p2' : '');
+
+    if (S.review !== null) {
+      text.textContent = 'ふりかえり 第' + S.review + '手';
+      sub.textContent = '「今の局面へ」で戻れます';
+      return;
+    }
 
     if (st.winner) {
       text.textContent = S.mode === 'local'
@@ -490,7 +718,7 @@
 
     if (S.mode === 'local') {
       text.textContent = playerName(st.turn) + 'の番';
-      sub.textContent = PLAYER_TAG[st.turn] + '・' + (st.turn === 1 ? '金' : '青');
+      sub.textContent = PLAYER_TAG[st.turn] + '・' + SIDE_LABEL[st.turn] + (S.flip ? '／対面表示' : '');
     } else if (mine) {
       text.textContent = 'あなたの番';
       sub.textContent = S.mode === 'link' || S.mode === 'room'
@@ -502,11 +730,55 @@
     }
   }
 
+  function renderReplay() {
+    var bar = el('replay-bar');
+    if (!bar) return;
+    var total = S.states.length - 1;
+    bar.hidden = total < 1;
+    if (total < 1) return;
+
+    var idx = S.review === null ? total : S.review;
+    el('replay-pos').textContent = L.timelineLabel(idx, total);
+    el('replay-badge').hidden = S.review === null;
+    el('btn-replay-live').hidden = S.review === null;
+    el('btn-replay-first').disabled = idx <= 0;
+    el('btn-replay-prev').disabled = idx <= 0;
+    el('btn-replay-next').disabled = idx >= total;
+    el('btn-replay-last').disabled = idx >= total;
+
+    var desc = '初期局面';
+    var view = S.states[idx];
+    if (idx > 0 && view && view.lastMove) {
+      desc = '第' + idx + '手・' + playerName(view.lastMove.p) + '：' + L.describeMove(view.lastMove);
+      if (view.reason === 'reveal') desc += '（自爆：下から相手のライン）';
+    }
+    el('replay-desc').textContent = desc;
+  }
+
+  function replayIndex() {
+    return S.review === null ? S.states.length - 1 : S.review;
+  }
+
+  function goReplay(idx) {
+    var total = S.states.length - 1;
+    if (total < 1) return;
+    if (idx < 0) idx = 0;
+    if (idx > total) idx = total;
+    S.sel = null;
+    S.review = idx >= total ? null : idx;
+    Sound.tap();
+    render();
+  }
+
   /* =====================================================================
      操作
      ===================================================================== */
 
   function onCell(i) {
+    if (S.review !== null) {
+      toast('ふりかえり中です。「今の局面へ」で戻れます');
+      return;
+    }
     if (!canPlayNow()) {
       if (S.thinking || S.busy) return;
       var st0 = S.state;
@@ -534,7 +806,7 @@
       if (L.isLegal(st, mv)) { commit(mv); return; }
 
       if (top && top.p === st.turn) {          // 選び直し
-        S.sel = { kind: 'board', cell: i };
+        S.sel = { kind: 'board', cell: i, size: top.s };
         Sound.pick();
         render();
         return;
@@ -545,7 +817,7 @@
     }
 
     if (top && top.p === st.turn) {
-      S.sel = { kind: 'board', cell: i };
+      S.sel = { kind: 'board', cell: i, size: top.s };
       Sound.pick();
       render();
     } else if (top) {
@@ -564,6 +836,10 @@
   }
 
   function onHand(size, player) {
+    if (S.review !== null) {
+      toast('ふりかえり中です。「今の局面へ」で戻れます');
+      return;
+    }
     if (!canPlayNow() || player !== S.state.turn) return;
     var hand = L.handCounts(S.state);
     if (hand[player][size] <= 0) { Sound.invalid(); return; }
@@ -591,17 +867,25 @@
       Sound.invalid();
       return;
     }
-    S.history.push(L.cloneState(prev));
+
+    S.states.push(L.cloneState(next));
     S.state = next;
     S.sel = null;
+    S.review = null;
+    S.animKey = '';
 
-    var gobbled = prev.board[mv.to] && prev.board[mv.to].length > 0;
+    var target = prev.board[mv.to];
+    var gobbled = !!(target && target.length);
+    var revealed = !!(next.winner && next.reason === 'reveal');
+    S.fx = { gobble: gobbled ? mv.to : -1, reveal: revealed };
+
     if (gobbled) Sound.gobble();
     else if (mv.t === 'move') Sound.move();
     else Sound.place();
 
     save();
     render();
+    clearFxSoon();
 
     if (S.mode === 'room') pushRoom();      // 決着の局面も相手へ送る
 
@@ -611,6 +895,12 @@
       return;
     }
     if (S.mode === 'cpu') maybeAI();
+  }
+
+  function clearFxSoon() {
+    setTimeout(function () {
+      S.fx = { gobble: -1, reveal: S.fx.reveal };
+    }, 820);
   }
 
   /* =====================================================================
@@ -654,6 +944,7 @@
     if (S.over) return;
     S.over = true;
     S.sel = null;
+    S.fx = { gobble: -1, reveal: false };
     render();
 
     var st = S.state;
@@ -685,7 +976,8 @@
       note.textContent = st.reason === 'reveal'
         ? 'コマを持ち上げた下から相手のラインが出ました。'
         : (iWon ? 'お見事。' : 'もう一回どうぞ。');
-      if (iWon) Sound.win(); else Sound.lose();
+      if (iWon) { if (st.reason === 'reveal') Sound.reveal(); else Sound.win(); }
+      else Sound.lose();
     } else {
       var mine = winner === S.me;
       badge.textContent = mine ? '勝ち' : '負け';
@@ -694,9 +986,13 @@
       note.textContent = st.reason === 'reveal'
         ? 'コマを持ち上げた下から相手のラインが出ました。'
         : '';
-      if (mine) Sound.win(); else Sound.lose();
+      if (mine) { if (st.reason === 'reveal') Sound.reveal(); else Sound.win(); }
+      else Sound.lose();
     }
 
+    recordStatsOnce();
+    el('result-stats').textContent = resultStatsLine();
+    el('btn-result-replay').hidden = S.states.length < 2;
     el('result-modal').hidden = false;
   }
 
@@ -705,25 +1001,26 @@
      ===================================================================== */
 
   function undo() {
-    if (S.busy || S.thinking || !S.history.length) return;
+    if (S.busy || S.thinking || S.states.length <= 1 || S.review !== null) return;
     bumpGen();
 
+    var keep = S.states.length - 2;
     if (S.mode === 'cpu') {
       // 自分の手番の直前まで戻す（AIの手も一緒に取り消す）
-      var idx = -1;
-      for (var i = S.history.length - 1; i >= 0; i--) {
-        if (S.history[i].turn === S.me) { idx = i; break; }
-      }
-      if (idx < 0) idx = 0;
-      S.state = S.history[idx];
-      S.history = S.history.slice(0, idx);
-    } else {
-      S.state = S.history.pop();
+      var i = S.states.length - 2;
+      while (i > 0 && S.states[i].turn !== S.me) i--;
+      keep = i;
     }
+    if (keep < 0) keep = 0;
+
+    S.states = S.states.slice(0, keep + 1);
+    S.state = L.cloneState(S.states[S.states.length - 1]);
     S.sel = null;
+    S.animKey = '';
+    S.fx = { gobble: -1, reveal: false };
     hideResult();
     S.over = false;
-    S.animKey = '';
+    Sound.undo();
     save();
     render();
   }
@@ -742,17 +1039,27 @@
     var st = S.state;
     var me = st.winner ? L.other(st.winner) : st.turn;
     var url;
+    var kind;
+    var finished = !!(st.winner || st.draw);
+
     if (S.mode === 'room' && S.room && S.room.id) {
       url = location.href.split('#')[0] + '#room=' + S.room.id;
+      kind = finished ? 'result' : 'room';
       el('share-title').textContent = '部屋に招待する';
       el('share-hint').textContent = '同じ部屋コードの相手と自動で同期します。';
     } else {
       url = makeShareUrl(st, me);
-      el('share-title').textContent = st.winner ? '結果の盤面を送る' : 'あなたの手を相手に送る';
-      el('share-hint').textContent = st.winner
+      kind = finished ? 'result' : 'play';
+      el('share-title').textContent = finished ? '結果の盤面を送る' : 'あなたの手を相手に送る';
+      el('share-hint').textContent = finished
         ? 'リンクを開くと、この盤面と結果が見えます。'
         : '相手がリンクを開いて指すと、また新しいリンクが届きます。';
     }
+
+    S.shareText = L.shareMessage(st, kind);
+    var preview = el('share-preview');
+    if (preview) preview.textContent = S.shareText;
+
     var input = el('share-url');
     var wasHidden = el('share-box').hidden;
     input.value = url;
@@ -786,23 +1093,29 @@
       toast(ok ? 'コピーしました' : '長押しでコピーしてください');
     }
     if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, fallback);
+      navigator.clipboard.writeText(text).then(function () { toast('コピーしました' ); }, fallback);
     } else {
       fallback();
     }
   }
 
-  function nativeShare() {
+  function shareFullText() {
     var url = el('share-url').value;
-    if (!url) return;
+    var msg = S.shareText || L.shareMessage(S.state, 'play');
+    return msg ? msg + '\n' + url : url;
+  }
+
+  function nativeShare() {
+    if (!el('share-url').value) return;
+    var url = el('share-url').value;
     if (navigator.share) {
       navigator.share({
         title: 'コマ・デュエル',
-        text: 'コマ・デュエルのつづきです。あなたの番！',
+        text: S.shareText || 'コマ・デュエルのつづきです。',
         url: url
       }).catch(function () {});
     } else {
-      copyText(url);
+      copyText(shareFullText());
     }
   }
 
@@ -918,8 +1231,9 @@
           S.room.seq = r.seq;
           if (st.turn === S.me || st.winner || st.draw) {
             S.state = st;
-            S.history = [];
+            S.states = [L.cloneState(st)];
             S.sel = null;
+            S.review = null;
             S.animKey = '';
             save();
             render();
@@ -964,12 +1278,14 @@
       var saved = loadSaved() || S.saved;
       if (!saved || !saved.decoded) { toast('続きの対局がありません'); return; }
       Sound.unlock();
-      if (saved.mode === 'room') {
-        // 部屋コードは保存していないので、そのままリンク対戦として続ける
-        startGame('link', { me: saved.me || 1, level: saved.level, state: saved.decoded });
-      } else {
-        startGame(saved.mode || 'local', { me: saved.me || 1, level: saved.level, state: saved.decoded });
-      }
+      var mode = saved.mode === 'room' ? 'link' : (saved.mode || 'local');
+      startGame(mode, {
+        me: saved.me || 1,
+        level: saved.level,
+        state: saved.decoded,
+        states: saved.states,
+        flip: saved.flip
+      });
     });
 
     // 強さ
@@ -1037,18 +1353,51 @@
         restart();
       });
     });
+    el('btn-flip').addEventListener('click', function () {
+      if (S.mode !== 'local') return;
+      S.flip = !S.flip;
+      S.animKey = '';
+      Sound.flip();
+      save();
+      render();
+      toast(S.flip ? '対面表示：手番のプレイヤーが手前に来ます' : '上下を元に戻しました');
+    });
     el('btn-share').addEventListener('click', function () {
       var box = el('share-box');
       if (box.hidden) { showShare(); return; }
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
-    el('btn-copy').addEventListener('click', function () { copyText(el('share-url').value); });
+    el('btn-copy').addEventListener('click', function () { copyText(shareFullText()); });
     el('btn-share-native').addEventListener('click', nativeShare);
+
+    // ふりかえり
+    el('btn-replay-first').addEventListener('click', function () { goReplay(0); });
+    el('btn-replay-prev').addEventListener('click', function () { goReplay(replayIndex() - 1); });
+    el('btn-replay-next').addEventListener('click', function () { goReplay(replayIndex() + 1); });
+    el('btn-replay-last').addEventListener('click', function () { goReplay(S.states.length - 1); });
+    el('btn-replay-live').addEventListener('click', function () { goReplay(S.states.length - 1); });
+
+    // 戦績
+    el('btn-stats-reset').addEventListener('click', function () {
+      askConfirm('戦績をリセットしますか？', 'この端末に記録した勝敗・連勝・2人対戦のスコアが消えます。', 'リセット', function () {
+        closeConfirm();
+        S.stats = L.resetStats();
+        saveStats();
+        renderStats();
+        toast('戦績をリセットしました');
+      });
+    });
 
     // 結果
     el('btn-again').addEventListener('click', function () {
       hideResult();
       restart();
+    });
+    el('btn-result-replay').addEventListener('click', function () {
+      hideResult();
+      goReplay(0);
+      var bar = el('replay-bar');
+      if (bar) { try { bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} }
     });
     el('btn-result-share').addEventListener('click', function () {
       el('result-modal').hidden = true;
@@ -1133,6 +1482,8 @@
      ===================================================================== */
 
   function boot() {
+    S.stats = loadStats();
+
     var saved = loadSaved();
     if (saved) {
       S.saved = saved;
@@ -1147,6 +1498,7 @@
     });
 
     bind();
+    renderStats();
     refreshResume();
 
     var params = readHash();

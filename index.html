@@ -96,6 +96,16 @@
         <p class="hint" id="room-status"></p>
       </details>
 
+      <details class="mode-card stats-card" id="stats-card">
+        <summary>
+          <span class="stats-title">戦績</span>
+          <span class="stats-sum" id="stats-sum">まだ対局なし</span>
+        </summary>
+        <div class="stats-rows" id="stats-rows"></div>
+        <button class="ghost wide" id="btn-stats-reset" type="button">この端末の記録をリセット</button>
+        <p class="hint">勝敗・連勝・2人対戦の累計はこの端末にだけ保存されます（個人情報は含みません）。</p>
+      </details>
+
       <div class="menu-foot">
         <button class="link-btn" id="btn-rules-2" type="button">ルール説明を読む</button>
         <button class="link-btn" id="btn-resume" type="button" hidden>前回の続きから</button>
@@ -136,14 +146,31 @@
         <div class="hand" id="hand-bottom"></div>
       </div>
 
+      <div class="replay" id="replay-bar" hidden>
+        <div class="replay-head">
+          <span class="replay-pos" id="replay-pos">第0手 / 0手</span>
+          <span class="replay-badge" id="replay-badge" hidden>ふりかえり中</span>
+          <button class="link-btn" id="btn-replay-live" type="button" hidden>今の局面へ</button>
+        </div>
+        <div class="replay-nav">
+          <button class="ghost tiny" id="btn-replay-first" type="button">◁ 初手</button>
+          <button class="ghost tiny" id="btn-replay-prev" type="button">1手戻る</button>
+          <button class="ghost tiny" id="btn-replay-next" type="button">1手進む</button>
+          <button class="ghost tiny" id="btn-replay-last" type="button">最終手 ▷</button>
+        </div>
+        <p class="hint replay-desc" id="replay-desc">初期局面</p>
+      </div>
+
       <div class="controls">
         <button class="ghost" id="btn-undo" type="button">待った</button>
         <button class="ghost" id="btn-restart" type="button">やり直す</button>
+        <button class="ghost" id="btn-flip" type="button" aria-pressed="false" hidden>対面表示</button>
         <button class="ghost" id="btn-share" type="button" hidden>リンクを送る</button>
       </div>
 
       <div class="share-box" id="share-box" hidden>
         <p class="share-title" id="share-title">あなたの手を相手に送る</p>
+        <p class="share-preview" id="share-preview"></p>
         <input id="share-url" class="text-input" type="text" readonly aria-label="共有リンク">
         <div class="row">
           <button class="primary" id="btn-copy" type="button">コピー</button>
@@ -198,8 +225,10 @@
     <div class="result-badge" id="result-badge">勝ち</div>
     <h2 id="result-title">あなたの勝ち！</h2>
     <p class="hint" id="result-note"></p>
+    <p class="stats-line" id="result-stats"></p>
     <div class="sheet-actions">
       <button class="primary wide" id="btn-again" type="button">もう一回</button>
+      <button class="ghost wide" id="btn-result-replay" type="button" hidden>ふりかえり（1手ずつ）</button>
       <button class="ghost wide" id="btn-result-share" type="button" hidden>結果の盤面を送る</button>
       <button class="ghost wide" id="btn-result-menu" type="button">メニューへ</button>
     </div>

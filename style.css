@@ -400,6 +400,23 @@ main {
   border-color: var(--line);
 }
 
+.player-panel.turn-now {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.03) 100%);
+}
+
+.player-panel.turn-now .hand-piece:not(:disabled):not(.on) {
+  border-color: rgba(255, 255, 255, 0.2);
+  animation: handBreathe 2.4s ease-in-out infinite;
+}
+
+.player-panel.turn-now.p1 .hand-piece:not(:disabled):not(.on) {
+  box-shadow: 0 0 0 1px rgba(243, 193, 76, 0.28), 0 3px 12px rgba(243, 193, 76, 0.18);
+}
+
+.player-panel.turn-now.p2 .hand-piece:not(:disabled):not(.on) {
+  box-shadow: 0 0 0 1px rgba(116, 174, 255, 0.3), 0 3px 12px rgba(116, 174, 255, 0.2);
+}
+
 .player-panel.active.p1 { box-shadow: inset 0 0 0 1px rgba(243, 193, 76, 0.35); }
 .player-panel.active.p2 { box-shadow: inset 0 0 0 1px rgba(116, 174, 255, 0.35); }
 
@@ -493,7 +510,7 @@ main {
 
 .board-wrap {
   position: relative;
-  width: min(100%, 46dvh, 420px);
+  width: min(100%, 44dvh, 420px);
   aspect-ratio: 1 / 1;
   margin: 2px auto;
 }
@@ -591,13 +608,87 @@ main {
   transform: translateY(calc(var(--d, 0) * 3.2px));
   transition: transform 0.16s ease;
   pointer-events: none;
+  z-index: 3;
+}
+
+/* 重なりの段差（下に隠れているコマの層）。色は透かさず、段数だけを見せる */
+.stack-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--w, 70%);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  transform: translate(-50%, calc(-50% + var(--k, 1) * 2.6px));
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  background: radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 72%);
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.45), inset 0 2px 3px rgba(255, 255, 255, 0.16),
+    inset 0 -4px 7px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 2;
+  opacity: calc(1 - (var(--k, 1) - 1) * 0.3);
+}
+
+.stack-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 4;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  color: #e6ebf5;
+  background: rgba(9, 12, 19, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0 5px;
+  pointer-events: none;
+}
+
+.cell.stacked {
+  background: radial-gradient(100% 100% at 50% 0%, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 70%);
 }
 
 .piece.s1 { width: 48%; }
 .piece.s2 { width: 66%; }
 .piece.s3 { width: 84%; }
 
-.piece.pop { animation: popIn 0.26s cubic-bezier(0.2, 1.3, 0.4, 1); }
+.piece.pop { animation: popIn 0.32s cubic-bezier(0.2, 1.5, 0.35, 1); }
+
+/* 大きいコマで小さいコマを「ガブッ」と上書きしたとき */
+.piece.slam { animation: slamIn 0.36s cubic-bezier(0.2, 1.6, 0.3, 1); }
+
+.cell.gobble {
+  border-color: rgba(255, 214, 150, 0.55);
+  box-shadow: inset 0 0 18px rgba(255, 196, 110, 0.22), inset 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.fx-wave {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 222, 168, 0.85);
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 2;
+  animation: waveOut 0.55s ease-out forwards;
+}
+
+/* 自爆（露出勝ち）: 下から出てきたコマで揃ったラインを光らせる */
+.board.reveal .cell.win .piece.top {
+  animation: revealGlow 0.85s ease-in-out 3 alternate;
+  animation-delay: calc(var(--i, 0) * 0.14s);
+}
+
+.board.reveal .cell.win {
+  border-color: rgba(255, 216, 140, 0.7);
+  box-shadow: inset 0 0 20px rgba(255, 198, 96, 0.25), inset 0 2px 6px rgba(0, 0, 0, 0.35);
+}
 
 .cell.picked .piece.top {
   transform: translateY(calc(var(--d, 0) * 3.2px - 13px)) scale(1.05);
@@ -643,13 +734,79 @@ main {
   display: flex;
   gap: 8px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .controls .ghost {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 68px;
   padding: 11px 10px;
   font-size: 13px;
 }
+
+.controls .ghost.on {
+  border-color: rgba(243, 193, 76, 0.65);
+  color: #ffe6ad;
+  background: rgba(243, 193, 76, 0.12);
+}
+
+/* ふりかえり（棋譜リプレイ） */
+
+.replay {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.replay-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.replay-pos {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.replay-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #bff3d4;
+  background: rgba(95, 212, 147, 0.16);
+  border: 1px solid rgba(95, 212, 147, 0.4);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.replay-head .link-btn {
+  margin-left: auto;
+  font-size: 11.5px;
+  padding: 2px 0;
+}
+
+.replay-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.ghost.tiny {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 4px;
+  font-size: 11.5px;
+  border-radius: 10px;
+  letter-spacing: 0;
+}
+
+.replay-desc { font-size: 11px; }
 
 .share-box {
   border: 1px solid var(--line);
@@ -668,6 +825,18 @@ main {
 }
 
 .share-box .text-input { font-size: 12px; }
+
+.share-preview {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #e8edf7;
+  background: rgba(243, 193, 76, 0.09);
+  border: 1px dashed rgba(243, 193, 76, 0.34);
+  border-radius: 10px;
+  padding: 8px 10px;
+  word-break: break-word;
+}
 
 /* ---------------- オーバーレイ / シート ---------------- */
 
@@ -769,6 +938,62 @@ main {
 .result-badge.lose { background: #ff9b9b; color: #3a0d0d; }
 .result-badge.draw { background: #c9cfdd; color: #1a1e28; }
 
+.stats-line {
+  margin: 2px 18px 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* 戦績カード（メニュー） */
+
+.stats-card summary {
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.stats-card summary::-webkit-details-marker { display: none; }
+
+.stats-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.stats-sum {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-card[open] .stats-title { color: var(--text); }
+
+.stats-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.stats-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 4px;
+}
+
+.stats-key { color: var(--muted); flex: 0 0 auto; }
+.stats-val { color: var(--text); font-weight: 700; text-align: right; }
+
 /* ---------------- トースト ---------------- */
 
 .toast {
@@ -804,6 +1029,28 @@ main {
 @keyframes popIn {
   from { transform: translateY(calc(var(--d, 0) * 3.2px - 22px)) scale(1.22); opacity: 0; }
   to { transform: translateY(calc(var(--d, 0) * 3.2px)) scale(1); opacity: 1; }
+}
+
+@keyframes slamIn {
+  0% { transform: translateY(calc(var(--d, 0) * 3.2px - 34px)) scale(1.38); opacity: 0; }
+  58% { transform: translateY(calc(var(--d, 0) * 3.2px + 2px)) scale(0.92); opacity: 1; }
+  78% { transform: translateY(calc(var(--d, 0) * 3.2px - 1px)) scale(1.04); }
+  100% { transform: translateY(calc(var(--d, 0) * 3.2px)) scale(1); }
+}
+
+@keyframes waveOut {
+  from { transform: translate(-50%, -50%) scale(0.55); opacity: 0.95; }
+  to { transform: translate(-50%, -50%) scale(2.1); opacity: 0; }
+}
+
+@keyframes revealGlow {
+  from { filter: drop-shadow(0 0 0 rgba(255, 214, 130, 0)); brightness(1); }
+  to { filter: drop-shadow(0 0 12px rgba(255, 214, 130, 0.95)); brightness(1.28); }
+}
+
+@keyframes handBreathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
 }
 
 @keyframes targetPulse {
@@ -843,6 +1090,9 @@ main {
   .hero-d1 { width: 24px; height: 24px; bottom: 31px; }
   .mode-card { padding: 12px; gap: 8px; }
   .hero-copy { font-size: 12.5px; }
+  .board-wrap { width: min(100%, 40dvh, 420px); }
+  .replay { padding: 6px 8px 4px; gap: 4px; }
+  .replay-desc { display: none; }
 }
 
 @media (min-width: 620px) {

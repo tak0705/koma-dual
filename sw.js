@@ -4,7 +4,7 @@
  */
 'use strict';
 
-var VERSION = 'koma-duel-v1';
+var VERSION = 'koma-duel-v2';
 var CORE = [
   './',
   './index.html',

@@ -390,6 +390,196 @@
     return r + '-' + c;
   }
 
+  /* ---------------- 対面表示 ---------------- */
+
+  /** 盤面を180°回したときの位置（3x3）。対面で座る2人対戦用。 */
+  function flipIndex(i) {
+    if (i === undefined || i === null || i < 0 || i >= CELLS) return i;
+    return CELLS - 1 - i;
+  }
+
+  /* ---------------- ふりかえり（棋譜） ---------------- */
+
+  var TIMELINE_MAX = 400;
+
+  /** 0手目から最終手までの各局面を、1本の文字列にまとめる（共有コードの連結）。 */
+  function encodeTimeline(states) {
+    if (!states || !states.length) return '';
+    var parts = [];
+    for (var i = 0; i < states.length && i < TIMELINE_MAX; i++) {
+      parts.push(encodeState(states[i]));
+    }
+    return parts.join(',');
+  }
+
+  /** encodeTimeline の逆。壊れた要素は読み飛ばし、読める範囲だけ返す。 */
+  function decodeTimeline(text) {
+    if (typeof text !== 'string' || !text) return [];
+    var parts = text.split(',');
+    if (parts.length > TIMELINE_MAX) parts = parts.slice(0, TIMELINE_MAX);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      try {
+        out.push(decodeState(parts[i]));
+      } catch (e) { /* 読めない局面は飛ばす */ }
+    }
+    return out;
+  }
+
+  /** ふりかえりで表示するラベル。 */
+  function timelineLabel(index, total) {
+    var t = Math.max(0, Number(total) || 0);
+    var i = Math.min(t, Math.max(0, Number(index) || 0));
+    return '第' + i + '手 / ' + t + '手';
+  }
+
+  /* ---------------- 共有の文面 ---------------- */
+
+  /**
+   * LINEなどにそのまま貼れる文面。
+   *  kind: 'play'（次の手を指してほしい） / 'result'（結果を送る） / 'room'（部屋へ誘う）
+   */
+  function shareMessage(state, kind) {
+    if (kind === 'result') return 'コマ・デュエルで対局しました！結果はこちら👇';
+    if (kind === 'room') return 'コマ・デュエルで部屋対戦しよう！👇';
+    var next = ((state && state.moveCount) || 0) + 1;
+    return 'コマ・デュエルで対局しよう！第' + next + '手👇';
+  }
+
+  /* ---------------- 戦績 ---------------- */
+
+  var STATS_VERSION = 1;
+  var STATS_LEVELS = ['easy', 'normal', 'hard'];
+
+  function blankRecord() {
+    return { w: 0, l: 0, d: 0, streak: 0, best: 0 };
+  }
+
+  function createStats() {
+    return {
+      v: STATS_VERSION,
+      cpu: {
+        easy: blankRecord(),
+        normal: blankRecord(),
+        hard: blankRecord()
+      },
+      local: { p1: 0, p2: 0, d: 0, games: 0 },
+      link: blankRecord()
+    };
+  }
+
+  function num(v) { return typeof v === 'number' && isFinite(v) && v > 0 ? Math.floor(v) : 0; }
+
+  function normalizeRecord(raw) {
+    var r = { w: num(raw && raw.w), l: num(raw && raw.l), d: num(raw && raw.d), streak: num(raw && raw.streak), best: num(raw && raw.best) };
+    if (r.streak > r.best) r.best = r.streak;
+    return r;
+  }
+
+  /** 保存データから戦績を復元（欠けた項目は0で埋める）。 */
+  function normalizeStats(raw) {
+    var s = createStats();
+    if (!raw || typeof raw !== 'object') return s;
+    for (var i = 0; i < STATS_LEVELS.length; i++) {
+      s.cpu[STATS_LEVELS[i]] = normalizeRecord(raw.cpu && raw.cpu[STATS_LEVELS[i]]);
+    }
+    s.link = normalizeRecord(raw.link);
+    var loc = raw.local || {};
+    s.local = { p1: num(loc.p1), p2: num(loc.p2), d: num(loc.d), games: num(loc.games) };
+    if (!s.local.games) s.local.games = s.local.p1 + s.local.p2 + s.local.d;
+    return s;
+  }
+
+  function resetStats() { return createStats(); }
+
+  /**
+   * 1局の結果を戦績へ足した新しい戦績を返す（元は書き換えない）。
+   *  info = { mode:'cpu'|'local'|'link'|'room', level:'easy'|'normal'|'hard',
+   *           result:'win'|'lose'|'draw' }
+   *  local の 'win' は先手（プレイヤー1）の勝ち。
+   */
+  function recordResult(stats, info) {
+    var s = normalizeStats(stats);
+    info = info || {};
+    var result = info.result === 'win' || info.result === 'lose' ? info.result : 'draw';
+
+    if (info.mode === 'cpu') {
+      var lv = STATS_LEVELS.indexOf(info.level) >= 0 ? info.level : 'normal';
+      var box = s.cpu[lv];
+      if (result === 'win') {
+        box.w += 1;
+        box.streak += 1;
+        if (box.streak > box.best) box.best = box.streak;
+      } else if (result === 'lose') {
+        box.l += 1;
+        box.streak = 0;
+      } else {
+        box.d += 1;
+        box.streak = 0;
+      }
+    } else if (info.mode === 'local') {
+      s.local.games += 1;
+      if (result === 'win') s.local.p1 += 1;
+      else if (result === 'lose') s.local.p2 += 1;
+      else s.local.d += 1;
+    } else if (info.mode === 'link' || info.mode === 'room') {
+      var lb = s.link;
+      if (result === 'win') {
+        lb.w += 1;
+        lb.streak += 1;
+        if (lb.streak > lb.best) lb.best = lb.streak;
+      } else if (result === 'lose') {
+        lb.l += 1;
+        lb.streak = 0;
+      } else {
+        lb.d += 1;
+        lb.streak = 0;
+      }
+    }
+    return s;
+  }
+
+  /** CPU全レベルの合計。 */
+  function statsCpuTotal(stats) {
+    var s = normalizeStats(stats);
+    var out = { w: 0, l: 0, d: 0 };
+    for (var i = 0; i < STATS_LEVELS.length; i++) {
+      out.w += s.cpu[STATS_LEVELS[i]].w;
+      out.l += s.cpu[STATS_LEVELS[i]].l;
+      out.d += s.cpu[STATS_LEVELS[i]].d;
+    }
+    return out;
+  }
+
+  /**
+   * 表示用の1行。scope = 'cpu:easy' | 'cpu:normal' | 'cpu:hard' | 'local' | 'link'
+   */
+  function statsLine(stats, scope) {
+    var s = normalizeStats(stats);
+    if (scope === 'local') {
+      var loc = s.local;
+      if (!loc.games) return 'まだ対局なし';
+      var txt = '先手 ' + loc.p1 + ' - ' + loc.p2 + ' 後手';
+      if (loc.d) txt += '（引き分け ' + loc.d + '）';
+      return txt;
+    }
+    var box;
+    if (scope === 'link') {
+      box = s.link;
+    } else {
+      var lv = String(scope || '').split(':')[1] || 'normal';
+      box = s.cpu[STATS_LEVELS.indexOf(lv) >= 0 ? lv : 'normal'];
+    }
+    var total = box.w + box.l + box.d;
+    if (!total) return 'まだ対局なし';
+    var out = box.w + '勝' + box.l + '敗';
+    if (box.d) out += box.d + '分';
+    if (box.streak > 0) out += '・' + box.streak + '連勝中';
+    if (box.best > 1) out += '（最高' + box.best + '連勝）';
+    return out;
+  }
+
   return {
     CELLS: CELLS,
     LINES: LINES,
@@ -417,6 +607,19 @@
     encodeMoves: encodeMoves,
     stateKey: stateKey,
     describeMove: describeMove,
-    cellName: cellName
+    cellName: cellName,
+    flipIndex: flipIndex,
+    encodeTimeline: encodeTimeline,
+    decodeTimeline: decodeTimeline,
+    timelineLabel: timelineLabel,
+    shareMessage: shareMessage,
+    createStats: createStats,
+    normalizeStats: normalizeStats,
+    resetStats: resetStats,
+    recordResult: recordResult,
+    statsCpuTotal: statsCpuTotal,
+    statsLine: statsLine,
+    STATS_LEVELS: STATS_LEVELS,
+    TIMELINE_MAX: TIMELINE_MAX
   };
 });
