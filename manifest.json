@@ -1,0 +1,20 @@
+{
+  "name": "コマ・デュエル",
+  "short_name": "コマ・デュエル",
+  "description": "大・中・小のコマで上書きできる進化版の三目並べ。CPU対戦、1台で2人対戦、リンクを送って遠くの相手とも遊べます。",
+  "lang": "ja",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0c11",
+  "theme_color": "#0d0f14",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

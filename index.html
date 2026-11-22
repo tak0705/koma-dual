@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>コマ・デュエル — 大中小の三目並べ</title>
+<meta name="description" content="大・中・小のコマで相手のコマを上書きできる、進化版の三目並べ。CPU対戦、1台で2人対戦、リンクを送って遠くの相手とも遊べます。">
+<meta name="theme-color" content="#0d0f14">
+<meta name="color-scheme" content="dark">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="コマ・デュエル">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <button class="icon-btn" id="btn-home" type="button" aria-label="メニューへ">☰</button>
+    <div class="titles">
+      <span class="title">コマ・デュエル</span>
+      <span class="subtitle" id="mode-label">大中小の三目並べ</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="btn-sound" type="button" aria-pressed="true" aria-label="音のオン・オフ"><span id="sound-icon">♪</span></button>
+      <button class="icon-btn" id="btn-rules" type="button" aria-label="ルール説明">?</button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ============ メニュー ============ -->
+    <section id="screen-menu" class="screen">
+      <div class="hero">
+        <div class="hero-stack" aria-hidden="true">
+          <span class="disc p1 s3 hero-d3"></span>
+          <span class="disc p2 s2 hero-d2"></span>
+          <span class="disc p1 s1 hero-d1"></span>
+        </div>
+        <p class="hero-copy">大きいコマで小さいコマを<br><b>上書き</b>しながら、一番上のコマで3つ並べる。</p>
+      </div>
+
+      <div class="mode-card">
+        <div class="mode-head">
+          <span class="mode-icon" aria-hidden="true">🤖</span>
+          <div class="mode-text">
+            <h2>CPUと対戦</h2>
+            <p>ピッコロAIと1人で</p>
+          </div>
+        </div>
+        <div class="seg" id="level-seg" role="group" aria-label="ピッコロAIの強さ">
+          <button type="button" data-level="easy">初級</button>
+          <button type="button" data-level="normal" class="on">中級</button>
+          <button type="button" data-level="hard">上級</button>
+        </div>
+        <p class="level-hint" id="level-hint">1手読みで阻止してくる</p>
+        <button class="primary" id="btn-start-cpu" type="button">はじめる</button>
+      </div>
+
+      <div class="mode-card">
+        <div class="mode-head">
+          <span class="mode-icon" aria-hidden="true">👥</span>
+          <div class="mode-text">
+            <h2>2人で対戦</h2>
+            <p>この1台をはさんで交互にタップ</p>
+          </div>
+        </div>
+        <button class="primary" id="btn-start-local" type="button">この1台で遊ぶ</button>
+      </div>
+
+      <div class="mode-card">
+        <div class="mode-head">
+          <span class="mode-icon" aria-hidden="true">🔗</span>
+          <div class="mode-text">
+            <h2>リンクで対戦</h2>
+            <p>遠くの相手と。サーバーは使わず、1手ごとにリンクを送るだけ</p>
+          </div>
+        </div>
+        <button class="primary" id="btn-start-link" type="button">先手で対局をはじめる</button>
+        <button class="ghost" id="btn-open-link" type="button">受け取ったリンク・コードを開く</button>
+      </div>
+
+      <details class="mode-card room-card">
+        <summary>部屋コードで対戦（サーバーがある場合）</summary>
+        <p class="note">Vercelなどに置いて <code>api/room.js</code> が動くときだけ使えます。GitHub Pages ではリンク対戦を使ってください。</p>
+        <div class="row">
+          <input id="room-code-input" class="text-input" type="text" inputmode="latin" autocomplete="off" autocapitalize="characters" placeholder="部屋コード" maxlength="8" aria-label="部屋コード">
+          <button class="ghost" id="btn-join-room" type="button">参加</button>
+        </div>
+        <button class="ghost wide" id="btn-create-room" type="button">部屋をつくる（先手）</button>
+        <p class="hint" id="room-status"></p>
+      </details>
+
+      <div class="menu-foot">
+        <button class="link-btn" id="btn-rules-2" type="button">ルール説明を読む</button>
+        <button class="link-btn" id="btn-resume" type="button" hidden>前回の続きから</button>
+      </div>
+    </section>
+
+    <!-- ============ ゲーム ============ -->
+    <section id="screen-game" class="screen hidden">
+
+      <div class="turn-bar" id="turn-bar">
+        <span class="turn-dot" id="turn-dot"></span>
+        <span class="turn-text" id="turn-text">あなたの番</span>
+        <span class="turn-sub" id="turn-sub"></span>
+      </div>
+
+      <div class="player-panel" id="panel-top">
+        <div class="player-head">
+          <span class="pdot p2" id="dot-top"></span>
+          <span class="pname" id="name-top">あいて</span>
+          <span class="ptag" id="tag-top"></span>
+        </div>
+        <div class="hand" id="hand-top"></div>
+      </div>
+
+      <div class="board-wrap">
+        <div class="board" id="board" role="grid" aria-label="3かける3の盤面"></div>
+        <svg class="win-layer" id="win-layer" viewBox="0 0 300 300" aria-hidden="true" focusable="false">
+          <line id="win-line" x1="50" y1="50" x2="250" y2="250"></line>
+        </svg>
+      </div>
+
+      <div class="player-panel" id="panel-bottom">
+        <div class="player-head">
+          <span class="pdot p1" id="dot-bottom"></span>
+          <span class="pname" id="name-bottom">あなた</span>
+          <span class="ptag" id="tag-bottom"></span>
+        </div>
+        <div class="hand" id="hand-bottom"></div>
+      </div>
+
+      <div class="controls">
+        <button class="ghost" id="btn-undo" type="button">待った</button>
+        <button class="ghost" id="btn-restart" type="button">やり直す</button>
+        <button class="ghost" id="btn-share" type="button" hidden>リンクを送る</button>
+      </div>
+
+      <div class="share-box" id="share-box" hidden>
+        <p class="share-title" id="share-title">あなたの手を相手に送る</p>
+        <input id="share-url" class="text-input" type="text" readonly aria-label="共有リンク">
+        <div class="row">
+          <button class="primary" id="btn-copy" type="button">コピー</button>
+          <button class="ghost" id="btn-share-native" type="button">LINEなどで送る</button>
+        </div>
+        <p class="hint" id="share-hint">相手がリンクを開いて指すと、また新しいリンクが届きます。</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ ルール ============ -->
+<div class="overlay" id="rules-modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rules-title">
+    <div class="sheet-head">
+      <h2 id="rules-title">ルール</h2>
+      <button class="icon-btn" id="btn-rules-close" type="button" aria-label="閉じる">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p class="lead">3×3のマスで、<b>一番上のコマ</b>が縦・横・斜めに3つ揃ったら勝ち。コマは<b>大・中・小を2個ずつ</b>、全部で6個ずつ持っています。</p>
+
+      <h3>手番にできること（どちらか1つ）</h3>
+      <ol>
+        <li><b>手持ちのコマを置く</b> — 空いているマス、または<b>自分より小さいコマ</b>の上に置けます。</li>
+        <li><b>盤上のコマを動かす</b> — 一番上にある自分のコマを、空いているマスか小さいコマの上へ移せます。</li>
+      </ol>
+
+      <h3>上書き（ガブ）</h3>
+      <p>大きいコマは小さいコマの上に重ねられます。重ねられたコマは隠れますが、上のコマが動くと<b>また出てきます</b>。同じ大きさの上には置けません。</p>
+
+      <h3>気をつけること（自爆）</h3>
+      <p class="warn">自分のコマを持ち上げたとき、下から出てきた相手のコマで相手が3つ揃ったら、<b>その場で相手の勝ち</b>です。動かす前に、下に何が隠れているか確かめましょう。</p>
+      <p class="note">※ 自分のライン完成と相手のライン露出が同時に起きた場合は、指した側の勝ちとします。</p>
+
+      <h3>コツ</h3>
+      <ul>
+        <li>大きいコマは強いけれど2個だけ。使いどころを見きわめる。</li>
+        <li>中・小のコマで相手の大を誘い出し、手元の大で取り返す。</li>
+        <li>1つの手で2方向の脅威を作ると、相手は片方しか受けられない。</li>
+      </ul>
+    </div>
+    <div class="sheet-foot">
+      <button class="primary wide" id="btn-rules-ok" type="button">わかった</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 結果 ============ -->
+<div class="overlay bottom" id="result-modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="result-title">
+    <div class="result-badge" id="result-badge">勝ち</div>
+    <h2 id="result-title">あなたの勝ち！</h2>
+    <p class="hint" id="result-note"></p>
+    <div class="sheet-actions">
+      <button class="primary wide" id="btn-again" type="button">もう一回</button>
+      <button class="ghost wide" id="btn-result-share" type="button" hidden>結果の盤面を送る</button>
+      <button class="ghost wide" id="btn-result-menu" type="button">メニューへ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 確認 ============ -->
+<div class="overlay" id="confirm-modal" hidden>
+  <div class="sheet small" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <h2 id="confirm-title">やり直しますか？</h2>
+    <p class="hint" id="confirm-note">いまの対局は消えます。</p>
+    <div class="sheet-actions row">
+      <button class="ghost" id="btn-confirm-cancel" type="button">やめる</button>
+      <button class="primary" id="btn-confirm-ok" type="button">やり直す</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ リンクを開く ============ -->
+<div class="overlay" id="link-modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="link-title">
+    <div class="sheet-head">
+      <h2 id="link-title">リンク・コードを開く</h2>
+      <button class="icon-btn" id="btn-link-close" type="button" aria-label="閉じる">✕</button>
+    </div>
+    <p class="hint">相手から届いたリンクを貼り付けてください。</p>
+    <textarea id="link-input" class="text-input" rows="3" placeholder="https://… または コード" aria-label="リンクまたはコード"></textarea>
+    <p class="hint" id="link-error"></p>
+    <div class="sheet-foot">
+      <button class="primary wide" id="btn-link-open" type="button">この局面を開く</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="logic.js"></script>
+<script src="ai.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

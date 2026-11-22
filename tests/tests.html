@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コマ・デュエル — テスト</title>
+<style>
+  body { margin: 0; padding: 18px; background: #0d0f14; color: #e8ecf5;
+         font: 13px/1.7 -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  .sum { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+  .sum.ok { color: #5fd493; }
+  .sum.ng { color: #ff8080; }
+  li { list-style: none; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  li.ok::before { content: "✓ "; color: #5fd493; }
+  li.ng::before { content: "✕ "; color: #ff8080; }
+  li.ng em { display: block; color: #ffb3b3; font-style: normal; font-size: 12px; padding-left: 14px; }
+  ul { padding: 0; margin: 0; }
+</style>
+</head>
+<body>
+<h1>コマ・デュエル ユニットテスト</h1>
+<div class="sum" id="sum">running…</div>
+<ul id="list"></ul>
+
+<script src="../logic.js"></script>
+<script src="../ai.js"></script>
+<script src="logic.tests.js"></script>
+<script>
+(function () {
+  var r = window.__KOMA_TEST_RESULTS__;
+  var sum = document.getElementById('sum');
+  var list = document.getElementById('list');
+  if (!r) { sum.textContent = 'テストが実行されませんでした'; return; }
+  sum.textContent = r.total + ' 件中 ' + r.passed + ' 件成功 / ' + r.failed + ' 件失敗';
+  sum.className = 'sum ' + (r.failed ? 'ng' : 'ok');
+  document.title = (r.failed ? '✕ ' : '✓ ') + r.passed + '/' + r.total;
+  (r.items || []).forEach(function (item) {
+    var li = document.createElement('li');
+    li.className = item.ok ? 'ok' : 'ng';
+    li.textContent = item.name;
+    if (!item.ok) {
+      var em = document.createElement('em');
+      em.textContent = item.error;
+      li.appendChild(em);
+    }
+    list.appendChild(li);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "koma-duel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "大中小のコマで上書きできる三目並べ（GitHub Pages / Vercel でそのまま公開できる静的ゲーム）",
+  "scripts": {
+    "test": "node tests/logic.tests.js",
+    "start": "python3 -m http.server 8000"
+  },
+  "keywords": [
+    "game",
+    "tic-tac-toe",
+    "gobblet",
+    "pwa"
+  ]
+}
