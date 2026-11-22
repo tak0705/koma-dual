@@ -309,6 +309,25 @@
     throws(function () { L.stringToBoard('x........'); }, '未知のコマ');
   });
 
+  test('共有コードを挟んでも1局が最後まで進む（リンク対戦の往復）', function () {
+    var rng = mulberry32(20261201);
+    var st = L.createGame();
+    var plies = 0;
+    while (!st.winner && !st.draw && plies++ < 60) {
+      var code = L.encodeState(st);
+      var back = L.decodeState(code);
+      eq(L.boardToString(back.board), L.boardToString(st.board), '盤面が一致する');
+      eq(back.turn, st.turn, '手番が一致する');
+      var moves = L.legalMoves(back);
+      ok(moves.length > 0, '合法手がある');
+      st = L.applyMove(back, moves[Math.floor(rng() * moves.length) % moves.length]);
+    }
+    ok(st.winner !== 0 || st.draw, '決着または引き分けで終わる');
+    if (st.winner) {
+      eq(L.decodeState(L.encodeState(st)).winner, st.winner, '勝者も復元できる');
+    }
+  });
+
   test('同じ盤面でも手番が違えば別のキーになる', function () {
     var st = fromCells(withCells([[4, 'a']]), 1);
     var st2 = L.cloneState(st);
@@ -356,6 +375,17 @@
     eq(after.winner, 0, '相手に即勝ちを許さない');
     var oppWins = 0;
     var om = L.legalMoves(after);
+    for (var i = 0; i < om.length; i++) if (AI.play(after, om[i]).winner === 2) oppWins++;
+    eq(oppWins, 0, '相手の即勝ちが残っていない');
+  });
+
+  test('中級AIは相手の即勝ちを放置しない', function () {
+    var st = fromCells(withCells([[4, 'a'], [6, 'A'], [7, 'A']]), 1);
+    var mv = AI.chooseMove(st, 'normal', { rng: mulberry32(3) });
+    var after = AI.play(st, mv);
+    eq(after.winner, 0, '自分から負ける手は指さない');
+    var om = L.legalMoves(after);
+    var oppWins = 0;
     for (var i = 0; i < om.length; i++) if (AI.play(after, om[i]).winner === 2) oppWins++;
     eq(oppWins, 0, '相手の即勝ちが残っていない');
   });
